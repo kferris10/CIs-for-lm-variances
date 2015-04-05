@@ -17,7 +17,7 @@ knitr::opts_chunk$set(echo = TRUE,
                       fig.height = 4, 
                       fig.width = 6, 
                       fig.align = "center", 
-                      size = "small", 
+                      size = "fotenotesize", 
                       digits = 3, 
                       comment = "#>")
 options(show.signif.stars = F, 
@@ -323,7 +323,6 @@ inits <- list(beta0 = 1,
        sig_plot = sigma_plot, 
        sig_tree = sigma_tree, 
        sig_core = sigma_core)
-  }
 # sampling parameters
 samps <- sampling(comp, data = dat_stan, chains = 4, iter = 2000, 
                   init = list(inits, inits, inits, inits))
