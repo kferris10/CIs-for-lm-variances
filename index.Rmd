@@ -98,7 +98,6 @@ sigma_site <- runif(1, 0, 1)
 sigma_plot <- runif(1, 0, 1)
 sigma_tree <- runif(1, 0, 1)
 sigma_core <- runif(1, 0, 1)
-sigma_depth <- runif(1, 0, 1)
 sigma_e <- runif(1, 0, 1)
 
 # LEF   ------------------------------------------------
@@ -108,17 +107,17 @@ n_sites <- 4
 n_plots <- 2
 n_trees <- 6
 n_cores <- 1
-n_depth <- 1
-n_obs <- prod(n_sites, n_plots, n_trees, n_cores, n_depth)
+n_obs <- prod(n_sites, n_plots, n_trees, n_cores)
 
 # simulating data
 lef <- data_frame(
   location = "LEF", 
-  site = paste0("S", rep(1:4, each = 24)), 
-  plot = paste0("P", rep(rep(1:2, each = 12), times = 4)), 
-  tree = paste0("T", rep(rep(1:6, each = 2), times = 8)), 
-  core = paste0("C", 1), 
-  depth = paste0("D", rep(1:2, times = 48)), 
+  site = paste0("S", rep(1:n_sites, each = n_obs / n_sites)), 
+  plot = paste0("P", rep(rep(1:n_plots, each = n_obs / (n_sites * n_plots)), 
+                         times = n_sites)), 
+  tree = paste0("T", rep(rep(1:n_trees, each = n_obs / (n_sites * n_plots * n_trees)), 
+                         times = n_sites * n_plots)), 
+  core = paste0("C", rep(rep(1:n_cores, each = n_obs / (n_sites * n_plots * n_trees * n_cores)))), 
   species = ifelse(substr(tree, 2, 2) <= 3, "DF", 
                    ifelse(site == "S1", "WL", 
                           ifelse(site == "S2", "PP", 
@@ -136,13 +135,10 @@ lef <- data_frame(
   group_by(site, plot, tree) %>% 
   mutate(b_tree = rnorm(1, 0, sigma_tree)) %>% 
   group_by(site, plot, tree, core) %>% 
-  mutate(b_core = 1) %>% 
-  group_by(site, plot, tree, core, depth) %>% 
-  mutate(b_depth = rnorm(1, 0, sigma_depth)) %>% 
+  mutate(b_core = rnorm(1, 0, sigma_core)) %>% 
   ungroup() %>% 
   mutate(epsilon = rnorm(n(), 0, sigma_e), 
-         m_c = int + b_site + b_plot + b_tree + b_core + b_depth + epsilon)  %>% 
-  filter(depth != "D2")  # removing 2-4 chunk
+         m_c = int + b_site + b_plot + b_tree + b_core + epsilon)
 
 # BZN ---------------------------------------------------
 
@@ -150,8 +146,7 @@ n_sites <- 2
 n_plots <- 2
 n_trees <- 4
 n_cores <- 4
-n_depth <- 1
-n_obs <- prod(n_sites, n_plots, n_trees, n_cores, n_depth)
+n_obs <- prod(n_sites, n_plots, n_trees, n_cores)
 
 bzn <- data_frame(
   location = "BZN", 
@@ -162,7 +157,6 @@ bzn <- data_frame(
                          times = n_sites * n_plots)), 
   core = paste0("C", rep(rep(1:n_cores, each = n_obs / (n_sites * n_plots * n_trees * n_cores)), 
                          times = n_sites * n_plots * n_trees)), 
-  depth = paste0("D", rep(1:n_depth, times = n_obs / n_depth)), 
   species = "DF", 
   elevation = ifelse(site %in% c("S1", "S2"), "H", "L"), 
   aspect = ifelse(site %in% c("S1", "S3"), "N", "S"), 
@@ -176,17 +170,14 @@ bzn <- data_frame(
   group_by(site, plot, tree) %>% 
   mutate(b_tree = rnorm(1, 0, sigma_tree)) %>% 
   group_by(site, plot, tree, core) %>% 
-  mutate(b_core = 1) %>% 
-  group_by(site, plot, tree, core, depth) %>% 
-  mutate(b_depth = rnorm(1, 0, sigma_depth)) %>% 
+  mutate(b_core = rnorm(1, 0, sigma_core)) %>% 
   ungroup() %>% 
   mutate(epsilon = rnorm(n(), 0, sigma_e), 
-         m_c = int + b_site + b_plot + b_tree + b_core + b_depth + epsilon)  %>% 
-  filter(species == "DF", ## selecting only Douglas Firs
-         depth != "D2")   ## removing 2-4 chunk
+         m_c = int + b_site + b_plot + b_tree + b_core + epsilon)
 
 # for each level ------------------------------------------
-tree_data <- bind_rows(bzn, lef)
+tree_data <- bind_rows(bzn, lef) %>% 
+  filter(species == "DF")            ## only Douglas Firs
 
 # core level
 by_core <- tree_data %>% 
