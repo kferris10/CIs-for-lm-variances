@@ -20,7 +20,7 @@ knitr::opts_chunk$set(echo = TRUE,
                       comment = "#>")
 options(show.signif.stars = F, 
         digits = 3)
-library(katexR)
+set.seed(42)
 ```
 
 
@@ -86,6 +86,172 @@ To generate a confidence interval for $\sigma$, we can just extract the middle 9
 quantile(sims@sigma, probs = c(.025, .975))
 ```
 
+## CIs for Multilevel Models Using `lm`
+
+```{r sim_tree_data, echo=FALSE}
+library(dplyr)
+
+# variability at each level
+sigma_site <- runif(1, 0, 1)
+sigma_plot <- runif(1, 0, 1)
+sigma_tree <- runif(1, 0, 1)
+sigma_core <- runif(1, 0, 1)
+sigma_depth <- runif(1, 0, 1)
+sigma_e <- runif(1, 0, 1)
+
+# LEF   ------------------------------------------------
+
+# number of observations at each level
+n_sites <- 4
+n_plots <- 2
+n_trees <- 6
+n_cores <- 1
+n_depth <- 1
+n_obs <- prod(n_sites, n_plots, n_trees, n_cores, n_depth)
+
+# simulating data
+lef <- data_frame(
+  location = "LEF", 
+  site = paste0("S", rep(1:4, each = 24)), 
+  plot = paste0("P", rep(rep(1:2, each = 12), times = 4)), 
+  tree = paste0("T", rep(rep(1:6, each = 2), times = 8)), 
+  core = paste0("C", 1), 
+  depth = paste0("D", rep(1:2, times = 48)), 
+  species = ifelse(substr(tree, 2, 2) <= 3, "DF", 
+                   ifelse(site == "S1", "WL", 
+                          ifelse(site == "S2", "PP", 
+                                 ifelse(site == "S3", "EB", 
+                                        "DR")))), 
+  elevation = ifelse(site %in% c("S1", "S2"), "H", "L"), 
+  aspect = ifelse(site %in% c("S1", "S3"), "N", "S"), 
+  topo = ifelse(plot == "P1", "valley", "slope")
+) %>% 
+  mutate(int = rnorm(1, 3, .5)) %>% 
+  group_by(site) %>% 
+  mutate(b_site = rnorm(1, 0, sigma_site)) %>% 
+  group_by(site, plot) %>% 
+  mutate(b_plot = rnorm(1, 0, sigma_plot)) %>% 
+  group_by(site, plot, tree) %>% 
+  mutate(b_tree = rnorm(1, 0, sigma_tree)) %>% 
+  group_by(site, plot, tree, core) %>% 
+  mutate(b_core = 1) %>% 
+  group_by(site, plot, tree, core, depth) %>% 
+  mutate(b_depth = rnorm(1, 0, sigma_depth)) %>% 
+  ungroup() %>% 
+  mutate(epsilon = rnorm(n(), 0, sigma_e), 
+         m_c = int + b_site + b_plot + b_tree + b_core + b_depth + epsilon)  %>% 
+  filter(depth != "D2")  # removing 2-4 chunk
+
+# BZN ---------------------------------------------------
+
+n_sites <- 2
+n_plots <- 2
+n_trees <- 4
+n_cores <- 4
+n_depth <- 1
+n_obs <- prod(n_sites, n_plots, n_trees, n_cores, n_depth)
+
+bzn <- data_frame(
+  location = "BZN", 
+  site = paste0("S", rep(1:n_sites, each = n_obs / n_sites)), 
+  plot = paste0("P", rep(rep(1:n_plots, each = n_obs / (n_sites * n_plots)), 
+                         times = n_sites)), 
+  tree = paste0("T", rep(rep(1:n_trees, each = n_obs / (n_sites * n_plots * n_trees)), 
+                         times = n_sites * n_plots)), 
+  core = paste0("C", rep(rep(1:n_cores, each = n_obs / (n_sites * n_plots * n_trees * n_cores)), 
+                         times = n_sites * n_plots * n_trees)), 
+  depth = paste0("D", rep(1:n_depth, times = n_obs / n_depth)), 
+  species = "DF", 
+  elevation = ifelse(site %in% c("S1", "S2"), "H", "L"), 
+  aspect = ifelse(site %in% c("S1", "S3"), "N", "S"), 
+  canopy = ifelse(plot == "P1", "open", "closed")
+)  %>% 
+  mutate(int = rnorm(1, 3, .5)) %>% 
+  group_by(site) %>% 
+  mutate(b_site = rnorm(1, 0, sigma_site)) %>% 
+  group_by(site, plot) %>% 
+  mutate(b_plot = rnorm(1, 0, sigma_plot)) %>% 
+  group_by(site, plot, tree) %>% 
+  mutate(b_tree = rnorm(1, 0, sigma_tree)) %>% 
+  group_by(site, plot, tree, core) %>% 
+  mutate(b_core = 1) %>% 
+  group_by(site, plot, tree, core, depth) %>% 
+  mutate(b_depth = rnorm(1, 0, sigma_depth)) %>% 
+  ungroup() %>% 
+  mutate(epsilon = rnorm(n(), 0, sigma_e), 
+         m_c = int + b_site + b_plot + b_tree + b_core + b_depth + epsilon)  %>% 
+  filter(species == "DF", ## selecting only Douglas Firs
+         depth != "D2")   ## removing 2-4 chunk
+
+# for each level ------------------------------------------
+tree_data <- bind_rows(bzn, lef)
+
+# core level
+by_core <- tree_data %>% 
+  group_by(location, site, plot, tree, core) %>% 
+  summarise(m_c = mean(m_c))
+# tree level
+by_tree <- tree_data %>% 
+  group_by(location, site, plot, tree) %>% 
+  summarise(m_c = mean(m_c))
+# plot level
+by_plot <- tree_data %>% 
+  group_by(location, site, plot) %>% 
+  summarise(m_c = mean(m_c))
+# site level
+by_site <- tree_data %>% 
+  group_by(location, site) %>% 
+  summarise(m_c = mean(m_c))
+```
+
+Estimated 95% confidence intervals
+
+```{r mods_cis}
+# models by level
+mod_core <- lm(m_c ~ location * site * plot * tree, data = by_core)
+mod_tree <- lm(m_c ~ location * site * plot, data = by_tree)
+mod_plot <- lm(m_c ~ location * site, data = by_plot)
+mod_site <- lm(m_c ~ location, data = by_site)
+# simulating RSE at each level
+sim_sigmas <- sapply(list(mod_core, mod_tree, mod_plot, mod_site), function(x) {
+  sim(x, 500)@sigma
+})
+# calculating CIs
+apply(sim_sigmas, 2, quantile, probs = c(.025, .975)) %>% 
+  data.frame() %>% 
+  setNames(c("CoreLevel", "TreeLevel", "PlotLevel", "SiteLevel"))
+```
+
+Comparing using `ggvis`
+
+```{r mods_densities}
+# turn simulations into long format
+library(tidyr)  ## to go to long format
+sim_sigmas_df <- sim_sigmas %>% 
+  data.frame() %>%   ## have to for tidyr
+  setNames(c("core_sd", "tree_sd", "plot_sd", "site_sd")) %>% 
+  gather(level, sigma)
+# density plots
+library(ggvis)
+sim_sigmas_df %>% 
+  ggvis(~sigma, fill = ~level) %>% 
+  group_by(level) %>% 
+  layer_densities()
+```
+
+Comparing to an `lmer` model
+
+```{r lmer_model}
+library(lme4)
+m3 <- lmer(m_c ~ (1 | location/site/plot/tree), data = tree_data)
+confint(m3)
+```
+
+
+## Code to Simulate Data
+
+```{r sim_tree_data, echo=TRUE, eval=FALSE}
+```
 
 
 
