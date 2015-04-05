@@ -1,0 +1,92 @@
+---
+title: "Confidence Intervals for Variances from lm"
+author: "Kevin"
+date: "Friday, April 03, 2015"
+output: 
+  html_document:
+    theme: cerulean
+---
+
+```{r knitr-setup, echo=FALSE, warning=FALSE, message=FALSE, cache=FALSE}
+knitr::opts_chunk$set(echo = TRUE, 
+                      message = FALSE, 
+                      warning = FALSE, 
+                      tidy = FALSE, 
+                      fig.height = 5, 
+                      fig.width = 8, 
+                      fig.align = "center", 
+                      size = "small", 
+                      digits = 3, 
+                      comment = "#>")
+options(show.signif.stars = F, 
+        digits = 3)
+library(katexR)
+```
+
+
+## Very Quick Example
+
+Simulated 95% confidence interval for the residual standard error from an `lm` model for the mtcars dataset.
+
+```{r mtcars_sim}
+m1 <- lm(mpg ~ wt, data = mtcars)
+library(arm)
+sims <- sim(m1, 1000)
+quantile(sims@sigma, probs = c(.025, .975))
+```
+
+## The Linear Model
+
+The following linear model can be fit in R with the `lm` function.
+
+$mpg_i = \beta_{0} + \beta_{1} wt_{i} + \epsilon_{i}$
+
+$\epsilon_i \sim N(0, \sigma^2)$
+
+```{r mtcars_lm}
+m2 <- lm(mpg ~ wt, data = mtcars)
+summary(m2)
+```
+
+In this model, there are three parameters: $\beta_0$, $\beta_1$, and $\sigma$.  R estimates these parameters as 37.3, -5.3, and 3.0 respectively.  
+
+## The `sim` function
+
+The `arm` package was written by Andrew Gelman and Yu-Song Su to complement Gelman's *Data Analysis Using Regression and Multilevel/Hierarchical
+Models* book.  In Chapter 7 of this book, they discuss how to use simulation for inferences in regression context.
+
+To aid with these inferences, they provided the `sim` function in the package.  This function simulates estimated parameters from the fitted model.  In the code below, I simulate $\beta_0$, $\beta_1$, and $\sigma$ 1000 times.  The `str` command reveals the structure of an R object.  We can see that the simulated values are stored in two separate parts of the `sims` object.  The estimated regression coefficients ($\beta_0$ and $\beta_1$) are stored in a matrix named `coef`, and the estimated variabilities (just $\sigma$ in this example) are named `sigma`.
+
+```{r lm_sims}
+library(arm)
+sims <- sim(m2, 1000)
+str(sims)
+```
+
+## Confidence Intervals for $\sigma$
+
+These simulations can be used to provide a summary of the model's suggested values of the parameters.
+
+```{r sims_summary}
+summary(sims@sigma) ## the @ sign is used because sim uses S4 class objects
+```
+
+We can visualize the distribution of simulated values.
+
+```{r sims_density}
+library(ggplot2)
+qplot(sims@sigma, geom = "density", fill = I("lightblue")) + 
+  labs(x = expression(sigma), 
+       title = "Simulated Distribution of Residual Standard Error")
+```
+
+To generate a confidence interval for $\sigma$, we can just extract the middle 95% of this distribution using the `quantile` function.
+
+```{r sims_ci}
+quantile(sims@sigma, probs = c(.025, .975))
+```
+
+
+
+
+
