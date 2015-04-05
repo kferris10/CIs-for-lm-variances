@@ -22,7 +22,6 @@ knitr::opts_chunk$set(echo = TRUE,
                       comment = "#>")
 options(show.signif.stars = F, 
         digits = 3)
-set.seed(42)
 ```
 
 
@@ -92,13 +91,13 @@ quantile(sims@sigma, probs = c(.025, .975))
 
 ```{r sim_tree_data, echo=FALSE}
 library(dplyr)
+set.seed(42)
 
 # variability at each level
 sigma_site <- runif(1, 0, 1)
 sigma_plot <- runif(1, 0, 1)
-sigma_tree <- runif(1, 0, 1)
+sigma_tree <- runif(1, 0, 1)  
 sigma_core <- runif(1, 0, 1)
-sigma_e <- runif(1, 0, 1)
 
 # LEF   ------------------------------------------------
 
@@ -137,8 +136,7 @@ lef <- data_frame(
   group_by(site, plot, tree, core) %>% 
   mutate(b_core = rnorm(1, 0, sigma_core)) %>% 
   ungroup() %>% 
-  mutate(epsilon = rnorm(n(), 0, sigma_e), 
-         m_c = int + b_site + b_plot + b_tree + b_core + epsilon)
+  mutate(m_c = int + b_site + b_plot + b_tree + b_core)
 
 # BZN ---------------------------------------------------
 
@@ -172,8 +170,7 @@ bzn <- data_frame(
   group_by(site, plot, tree, core) %>% 
   mutate(b_core = rnorm(1, 0, sigma_core)) %>% 
   ungroup() %>% 
-  mutate(epsilon = rnorm(n(), 0, sigma_e), 
-         m_c = int + b_site + b_plot + b_tree + b_core + epsilon)
+  mutate(m_c = int + b_site + b_plot + b_tree + b_core)
 
 # for each level ------------------------------------------
 tree_data <- bind_rows(bzn, lef) %>% 
@@ -182,28 +179,42 @@ tree_data <- bind_rows(bzn, lef) %>%
 # core level
 by_core <- tree_data %>% 
   group_by(location, site, plot, tree, core) %>% 
-  summarise(m_c = mean(m_c))
+  summarise(m_c = mean(m_c)) %>% 
+  ungroup() %>% 
+  mutate(site = interaction(location, site), 
+         plot = interaction(location, site, plot), 
+         tree = interaction(location, site, plot, tree), 
+         core = interaction(location, site, plot, tree))
 # tree level
 by_tree <- tree_data %>% 
   group_by(location, site, plot, tree) %>% 
-  summarise(m_c = mean(m_c))
+  summarise(m_c = mean(m_c)) %>% 
+  ungroup() %>% 
+  mutate(site = interaction(location, site), 
+         plot = interaction(location, site, plot), 
+         tree = interaction(location, site, plot, tree))
 # plot level
 by_plot <- tree_data %>% 
   group_by(location, site, plot) %>% 
-  summarise(m_c = mean(m_c))
+  summarise(m_c = mean(m_c)) %>% 
+  ungroup() %>% 
+  mutate(site = interaction(location, site), 
+         plot = interaction(location, site, plot))
 # site level
 by_site <- tree_data %>% 
   group_by(location, site) %>% 
-  summarise(m_c = mean(m_c))
+  summarise(m_c = mean(m_c)) %>% 
+  ungroup() %>% 
+  mutate(site = interaction(location, site))
 ```
 
 Estimated 95% confidence intervals
 
 ```{r mods_cis}
 # models by level
-mod_core <- lm(m_c ~ location * site * plot * tree, data = by_core)
-mod_tree <- lm(m_c ~ location * site * plot, data = by_tree)
-mod_plot <- lm(m_c ~ location * site, data = by_plot)
+mod_core <- lm(m_c ~ tree, data = by_core)
+mod_tree <- lm(m_c ~ plot, data = by_tree)
+mod_plot <- lm(m_c ~ site, data = by_plot)
 mod_site <- lm(m_c ~ location, data = by_site)
 # simulating RSE at each level
 sim_sigmas <- sapply(list(mod_core, mod_tree, mod_plot, mod_site), function(x) {
@@ -223,7 +234,7 @@ library(tidyr)  ## to go to long format
 sim_sigmas_df <- sim_sigmas %>% 
   data.frame() %>%   ## have to for tidyr
   setNames(c("core_sd", "tree_sd", "plot_sd", "site_sd")) %>% 
-  gather(level, sigma)
+  gather(level, sigma)  ## going to long format
 # density plots
 library(ggvis)
 sim_sigmas_df %>% 
@@ -236,10 +247,96 @@ Comparing to an `lmer` model
 
 ```{r lmer_model}
 library(lme4)
-m3 <- lmer(m_c ~ (1 | location/site/plot/tree), data = tree_data)
+m3 <- lmer(m_c ~ location + (1 | site/plot/tree), data = by_core)
 confint(m3)
 ```
 
+## Bayesian Hierarchical Model with Stan
+
+Here's the model written and fit in Stan.  I'm omitting all the Stan messages to save space.
+
+```{r stan_mod, results='hide', cache=TRUE}
+stan_mod <- "
+data {
+  int N;  
+  int J;  
+  int K;  
+  int L;  
+  
+  vector[N] y;
+  int<lower=0, upper=1> locLEF[N];
+  int<lower=1, upper=J> site[N];
+  int<lower=1, upper=K> plot[N];
+  int<lower=1, upper=L> tree[N];
+}
+parameters {
+  real beta0;
+  real beta1;
+  real<lower=0, upper=10> sig_site;
+  real<lower=0, upper=10> sig_plot;
+  real<lower=0, upper=10> sig_tree;
+  real<lower=0, upper=10> sig_core;
+  
+  vector[J] b_site;
+  vector[K] b_plot;
+  vector[L] b_tree;
+}
+transformed parameters {
+  vector[N] yhat;
+  
+  for(i in 1:N) 
+    yhat[i] <- beta0 + beta1 * locLEF[i] + 
+    b_site[site[i]] +  b_plot[plot[i]] + b_tree[tree[i]];
+}
+model {
+  y ~ normal(yhat, sig_core);
+  beta0 ~ normal(0, 100);
+  beta1 ~ normal(0, 100);
+  b_site ~ normal(0, sig_site);
+  b_plot ~ normal(0, sig_plot);
+  b_tree ~ normal(0, sig_tree);
+}
+"
+library(rstan)
+trans <- stanc(model_code = stan_mod)
+comp <- stan_model(stanc_ret = trans)
+
+# data for stan
+dat_stan <- with(by_core %>% droplevels(), 
+                 list(N = nrow(by_core), 
+                      J = n_distinct(site), 
+                      K = n_distinct(plot), 
+                      L = n_distinct(tree), 
+                      y = m_c, 
+                      locLEF = ifelse(location == "LEF", 1, 0), 
+                      site = as.integer(as.factor(site)), 
+                      plot = as.integer(as.factor(plot)), 
+                      tree = as.integer(as.factor(tree))
+                      )
+                 )
+inits <- list(beta0 = 1, 
+       beta1 = 1, 
+       b_site = rep(1, 6), 
+       b_plot = rep(1, 12), 
+       b_tree = rep(1, 40), 
+       sig_site = sigma_site, 
+       sig_plot = sigma_plot, 
+       sig_tree = sigma_tree, 
+       sig_core = sigma_core)
+  }
+# sampling parameters
+samps <- sampling(comp, data = dat_stan, chains = 4, iter = 2000, 
+                  init = list(inits, inits, inits, inits))
+```
+
+Stan is having a really tough time identifying $\sigma_{tree}$.  I'm guessing this is because it is so small relative to the others.  
+
+```{r stan_results, fig.width=6, fig.height=6}
+print(samps, pars = c("sig_site", "sig_plot", "sig_tree", "sig_core"))
+traceplot(samps, pars = c("sig_site", "sig_plot", "sig_tree", "sig_core"), inc_warmup = F)
+```
+
+Stan gives us generally the same results as `lmer`.  The major difference is is that Stan has a much wider intervals for the variability between sites.  I have no idea why this is.
 
 ## Code to Simulate Data
 
