@@ -13,7 +13,7 @@ output:
 knitr::opts_chunk$set(echo = TRUE, 
                       message = FALSE, 
                       warning = FALSE, 
-                      tidy = FALSE, 
+                      tidy = FALSE,
                       fig.height = 4, 
                       fig.width = 6, 
                       fig.align = "center", 
@@ -22,6 +22,7 @@ knitr::opts_chunk$set(echo = TRUE,
                       comment = "#>")
 options(show.signif.stars = F, 
         digits = 3)
+library(dplyr)
 ```
 
 
@@ -35,6 +36,24 @@ library(arm)
 sims <- sim(m1, 1000)
 quantile(sims@sigma, probs = c(.025, .975))
 ```
+
+## Comparing CIs for Multilevel Models Using `lm`, `lmer`, and `Stan`
+
+This is a very quick comparison of the confidence intervals for variance components.  I put it up at the top so you we can see the results without having to follow along with all of my code.  I used `lm`, `lmer`, and `Stan` to estimate the variability at each level in the sampling hierarchy and here are 95% confidence intervals using each method.
+
+```{r comparison_table, echo=FALSE, results='asis'}
+data_frame(
+  Level = c("Core", "Tree", "Plot", "Site"), 
+  Truth = c(.830, .286, .937, .915), 
+  lm = c("(.627, .921)", "(.487, .839)", "(1.06, 3.63)", "(.518, 2.36)"), 
+  lmer = c("(.628, .874)", "(.000, .404)", "(.891, 2.125)", "(.000, 1.258)"), 
+  stan = c("(.63, .87)", "(.01, .45)", "(.99, 2.97)", "(.04, 3.75)")
+  ) %>% 
+  knitr::kable(align = "l")
+```
+
+The `Stan` and `lmer` results seem to be fairly similar and reasonably accurate.  It does appear as though `Stan` is a little bit more conservative though.  The `lm` results are worrisome though as the confidence intervals for tree and plot level variability are off by quite a bit.
+
 
 ## The Linear Model
 
@@ -255,7 +274,7 @@ confint(m3)
 
 Here's the model written and fit in Stan.  I'm omitting all the Stan messages to save space.
 
-```{r stan_mod, results='hide', cache=TRUE}
+```{r stan_mod, results='hide'}
 stan_mod <- "
 data {
   int N;  
@@ -324,7 +343,7 @@ inits <- list(beta0 = 1,
        sig_tree = sigma_tree, 
        sig_core = sigma_core)
 # sampling parameters
-samps <- sampling(comp, data = dat_stan, chains = 4, iter = 2000, 
+samps <- sampling(comp, data = dat_stan, chains = 4, iter = 2000, thin = 8, 
                   init = list(inits, inits, inits, inits))
 ```
 
